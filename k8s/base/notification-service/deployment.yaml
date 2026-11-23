@@ -1,0 +1,74 @@
+# Consumes order events from RabbitMQ and sends emails. It has no Service:
+# nothing calls it, it only reads from the queue. Replicas share the queue as
+# competing consumers, so running more than one is safe.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: ecommerce
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: notification-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+        - name: notification-service
+          # Placeholder name: the overlay sets the real registry and tag (kustomization.yaml "images:")
+          image: shoplite/notification-service
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: health
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: notification-service-config
+            # SMTP_USER / SMTP_PASS
+            - secretRef:
+                name: notification-service-secret
+          env:
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_PASS
+            # $(VAR) is expanded by Kubernetes from the vars defined above
+            - name: RABBITMQ_URL
+              value: amqp://$(RABBITMQ_USER):$(RABBITMQ_PASS)@rabbitmq:5672
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 192Mi
+          # /healthz: process is up. The RabbitMQ client reconnects on its own,
+          # so a broker restart must not make Kubernetes restart this pod.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          # /readyz: consuming from RabbitMQ. With no Service in front, this only
+          # gates rollouts (a new pod must be consuming before an old one stops).
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 2

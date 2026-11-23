@@ -1,0 +1,164 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  mongo-users:
+    image: mongo:6.0
+    volumes:
+      - mongo_users:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  mongo-products:
+    image: mongo:6.0
+    volumes:
+      - mongo_products:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  mongo-orders:
+    image: mongo:6.0
+    volumes:
+      - mongo_orders:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # App service healthchecks come from each Dockerfile's HEALTHCHECK
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    environment:
+      GRPC_PORT: 50051
+      MONGO_URI: mongodb://mongo-users:27017/users
+      JWT_SECRET: supersecretkey
+      JWT_EXPIRES_IN: 7d
+    depends_on:
+      mongo-users:
+        condition: service_healthy
+    restart: unless-stopped
+
+  product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    environment:
+      GRPC_PORT: 50052
+      MONGO_URI: mongodb://mongo-products:27017/products
+    depends_on:
+      mongo-products:
+        condition: service_healthy
+    restart: unless-stopped
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    environment:
+      GRPC_PORT: 50053
+      MONGO_URI: mongodb://mongo-orders:27017/orders
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      PRODUCT_SERVICE_URL: product-service:50052
+    depends_on:
+      mongo-orders:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      # Real SMTP server, from your shell or a git-ignored .env file next to
+      # this file (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL).
+      # Without them, sending fails and messages end up in the dead-letter queue.
+      SMTP_HOST: ${SMTP_HOST:-smtp.mailtrap.io}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      FROM_EMAIL: ${FROM_EMAIL:-noreply@ecommerce.com}
+      HEALTH_PORT: 8080
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      USER_SERVICE_URL: user-service:50051
+      PRODUCT_SERVICE_URL: product-service:50052
+      ORDER_SERVICE_URL: order-service:50053
+    depends_on:
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Customer-facing web app: http://localhost:8080
+  storefront:
+    build:
+      context: frontends/storefront
+    ports:
+      - "8080:80"
+    environment:
+      API_GATEWAY_URL: http://api-gateway:3000
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Admin web app: http://localhost:8081/admin/ (/ redirects there)
+  admin:
+    build:
+      context: frontends/admin
+    ports:
+      - "8081:80"
+    environment:
+      API_GATEWAY_URL: http://api-gateway:3000
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mongo_users:
+  mongo_products:
+  mongo_orders:

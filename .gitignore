@@ -1,0 +1,15 @@
+node_modules
+.env
+*.log
+.DS_Store
+dist
+k8s/**/secret.yaml
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.tfstate.lock.info
+crash.log

@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package order;
+
+service OrderService {
+  rpc CreateOrder (CreateOrderRequest) returns (CreateOrderResponse);
+  rpc GetOrder (GetOrderRequest) returns (GetOrderResponse);
+  rpc ListUserOrders (ListUserOrdersRequest) returns (ListUserOrdersResponse);
+  // Admin: all orders, optionally filtered by status
+  rpc ListAllOrders (ListAllOrdersRequest) returns (ListUserOrdersResponse);
+  rpc CancelOrder (CancelOrderRequest) returns (CancelOrderResponse);
+  rpc UpdateOrderStatus (UpdateOrderStatusRequest) returns (UpdateOrderStatusResponse);
+}
+
+message OrderItem {
+  string productId = 1;
+  int32 quantity = 2;
+  double price = 3;
+}
+
+message CreateOrderRequest {
+  string userId = 1;
+  repeated OrderItem items = 2; // price is ignored; it is taken from product-service
+  string email = 3;
+}
+
+message CreateOrderResponse {
+  string orderId = 1;
+  string status = 2;
+  double totalAmount = 3;
+}
+
+message GetOrderRequest {
+  string orderId = 1;
+  string userId = 2; // owner; order is only returned if it belongs to this user
+}
+
+message GetOrderResponse {
+  string orderId = 1;
+  string userId = 2;
+  repeated OrderItem items = 3;
+  string status = 4;
+  double totalAmount = 5;
+  string createdAt = 6;
+  string email = 7;
+}
+
+message ListUserOrdersRequest {
+  string userId = 1;
+}
+
+message ListUserOrdersResponse {
+  repeated GetOrderResponse orders = 1;
+}
+
+message ListAllOrdersRequest {
+  string status = 1; // empty = all
+}
+
+message CancelOrderRequest {
+  string orderId = 1;
+  string userId = 2;
+}
+
+message CancelOrderResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdateOrderStatusRequest {
+  string orderId = 1;
+  string status = 2;
+}
+
+message UpdateOrderStatusResponse {
+  bool success = 1;
+  string status = 2;
+}

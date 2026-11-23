@@ -1,0 +1,43 @@
+# Resolve the gateway per request (not once at startup), so nginx still starts
+# when the gateway isn't up yet. NGINX_LOCAL_RESOLVERS comes from /etc/resolv.conf.
+resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+
+server {
+  listen 80;
+  root /usr/share/nginx/html;
+  # Relative Location headers, so redirects keep the host and port the browser used
+  absolute_redirect off;
+
+  location = /healthz {
+    access_log off;
+    default_type application/json;
+    return 200 '{"status":"ok"}';
+  }
+
+  # The app lives under /admin/ so it can share one ALB with the storefront
+  location = / {
+    return 302 /admin/;
+  }
+
+  # Local/docker-compose only: in Kubernetes the ALB routes /api straight to the
+  # gateway, so these requests never reach this container.
+  location /api/ {
+    set $api_upstream ${API_GATEWAY_URL};
+    proxy_pass $api_upstream;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  # Vite emits content-hashed filenames, so these can be cached forever
+  location /admin/assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+
+  # SPA routing: unknown paths under /admin/ serve the app
+  location /admin/ {
+    try_files $uri /admin/index.html;
+    add_header Cache-Control "no-cache";
+  }
+}
